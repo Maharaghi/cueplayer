@@ -30,3 +30,7 @@ Run the program with
 ```
 python main.py
 ```
+Or if you want to make sure its black and white (to not have random colors showing)
+```
+python main.py bw
+```
