@@ -1,9 +1,10 @@
-from cv2 import VideoCapture, CAP_PROP_FRAME_HEIGHT, CAP_PROP_FRAME_WIDTH, CAP_PROP_FPS, VideoWriter, VideoWriter_fourcc
+from cv2 import VideoCapture, CAP_PROP_FPS
 from PIL import Image
 from cuesdk import CueSdk
 import time
 import math
 import numpy as np
+import sys
 
 def get_available_leds():
     leds = list()
@@ -14,9 +15,9 @@ def get_available_leds():
     return leds
 
 # Hardcoded W:H values for keyboard because I'm lazy
+# Also try setting the H to 1 size greater than keyboard. Fixed my bottom row not lighting up.
 def scaleImage(img):
-    return img.resize((24, 6), resample=Image.ANTIALIAS)
-    # return img.resize((24, 6), resample=Image.LANCZOS)
+    return img.resize((24, 7), resample=Image.LANCZOS)
 
 def getClosestPoint(c1, keyList):
     closest = 9999999
@@ -30,7 +31,7 @@ def getClosestPoint(c1, keyList):
             targetKey = key
     return targetKey
 
-def main():
+def main(color=True):
     global sdk
 
     sdk = CueSdk()
@@ -40,6 +41,8 @@ def main():
         err = sdk.get_last_error()
         print("Handshake failed: %s" % err)
         return
+
+    print("Running in color mode?", color)
 
     colors = get_available_leds()
 
@@ -62,7 +65,7 @@ def main():
     yMin = np.min(y)
     xMin = np.min(x)
 
-    # Make sure the keyvals X:Y are set to 24:6 (just because the keyboard has basically 6 rows and 24 keys as width)
+    # Make sure the keyvals X:Y are set to keyboard width:height, 24:6 in my case. Just wing it tbh
     for c in keyList:
         c[1] = ((c[1][0] - xMin)/normX * 24, (c[1][1] - yMin)/normY * 6)
 
@@ -73,28 +76,47 @@ def main():
     timeStep = 1/fps
 
     count = 0
+    lastFrameCount = count
     success = True
 
-    accTDiff = 0
+    skipped = 0
+
+    timeStepNano = timeStep * 1000000000
+
+    timestamp = time.time_ns()
+    startTime = time.time_ns()
     
-    # Reset every key to black, because we might not write to all keys, and it will throw an error if a key doesnt have rgb value
+    # Set every key to black, because we might not write to all keys, and it will throw an error if a key doesnt have rgb value
     for key in firstDevice:
         firstDevice[key] = (0, 0, 0)
 
     while success:
-        print("frame: ", count)
-        # Read next image
-        success, image = vcapture.read()
-        if accTDiff >= timeStep:
-            print("Frameskip, accTDiff was", accTDiff)
-            accTDiff -= timeStep
-        elif success:
-            t = time.time_ns()
+        if time.time_ns() - timestamp > 1000000000 - timeStepNano//2:
+            print("FPS:", (count - lastFrameCount) - skipped, " | Skipped frames:", skipped)
+            skipped = 0
+            lastFrameCount = count
+            timestamp = time.time_ns()
 
-            # OpenCV returns images as BGR, remember to convert to RGB (either here or when setting LED)
-            # image = Image.fromarray(image[..., ::-1])
+        targetTime = timeStepNano * count
+
+        success, image = vcapture.read()
+        while (time.time_ns() - startTime) > targetTime+timeStepNano*2:
+            skipped += 1
+            count += 1
+            targetTime = timeStepNano * count
+            success, image = vcapture.read()
+
+        while (time.time_ns() - startTime) < targetTime:
+            continue
+
+        if success:
             image = Image.fromarray(image)
-            image = np.asarray(scaleImage(image))
+            if not color:
+                image = image.convert('L')
+                image = np.asarray(scaleImage(image).convert('RGB'))
+            else:
+                image = np.asarray(scaleImage(image))
+                
 
             for y in range(len(image)):
                 for x in range(len(image[y])):
@@ -103,12 +125,15 @@ def main():
 
             sdk.set_led_colors_buffer_by_device_index(0, firstDevice)
             sdk.set_led_colors_flush_buffer()
-            tdiff = timeStep - (time.time_ns() - t) / 1000000000
-            if tdiff > 0:
-                time.sleep(tdiff)
-            else:
-                accTDiff -= tdiff
+
         count += 1
 
+#
+# Run "python main.py bw" if you wanna run in black&white mode
+#
 if __name__ == "__main__":
-    main()
+    args = sys.argv
+    
+    bW = len(args) > 1 and args[1] == "bw"
+
+    main(color=(not bW))
