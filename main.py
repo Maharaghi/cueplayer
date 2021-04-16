@@ -7,7 +7,7 @@ import numpy as np
 import sys
 
 # Hardcoded W:H values. Change as needed
-WIDTH = 25
+WIDTH = 26
 HEIGHT = 6
 
 def get_available_leds():
