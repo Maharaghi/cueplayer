@@ -6,6 +6,10 @@ import math
 import numpy as np
 import sys
 
+# Hardcoded W:H values. Change as needed
+WIDTH = 25
+HEIGHT = 6
+
 def get_available_leds():
     leds = list()
     device_count = sdk.get_device_count()
@@ -14,10 +18,8 @@ def get_available_leds():
         leds.append(led_positions)
     return leds
 
-# Hardcoded W:H values for keyboard because I'm lazy
-# Also try setting the H to 1 size greater than keyboard. Fixed my bottom row not lighting up.
 def scaleImage(img):
-    return img.resize((24, 7), resample=Image.LANCZOS)
+    return img.resize((WIDTH, HEIGHT), resample=Image.LANCZOS)
 
 def getClosestPoint(c1, keyList):
     closest = 9999999
@@ -60,14 +62,14 @@ def main(color=True):
         y.append(c[1][1])
     
     # Normalize and get min/max
+    # I had to add a bit to normalized X to make it cover the entire keyboard.
     normY = (np.max(y) - np.min(y))
-    normX = (np.max(x) - np.min(x))
+    normX = (np.max(x) - np.min(x)) + 20
     yMin = np.min(y)
     xMin = np.min(x)
 
-    # Make sure the keyvals X:Y are set to keyboard width:height, 24:6 in my case. Just wing it tbh
     for c in keyList:
-        c[1] = ((c[1][0] - xMin)/normX * 24, (c[1][1] - yMin)/normY * 6)
+        c[1] = ((c[1][0] - xMin)/normX * WIDTH, (c[1][1] - yMin)/normY * HEIGHT)
 
     video_path = "video.mp4"
 
@@ -89,6 +91,15 @@ def main(color=True):
     # Set every key to black, because we might not write to all keys, and it will throw an error if a key doesnt have rgb value
     for key in firstDevice:
         firstDevice[key] = (0, 0, 0)
+
+    # Lets just map all the keys right now so we can skip checking the distance every frame
+    keymap = []
+    for y in range(HEIGHT):
+        keymap.append([])
+        for x in range(WIDTH):
+            # We add 1 to y here, because apparently that makes the top row work properly.
+            key = getClosestPoint((x, y+1), keyList)
+            keymap[y].append(key)
 
     while success:
         if time.time_ns() - timestamp > 1000000000 - timeStepNano//2:
@@ -117,10 +128,9 @@ def main(color=True):
             else:
                 image = np.asarray(scaleImage(image))
                 
-
             for y in range(len(image)):
                 for x in range(len(image[y])):
-                    key = getClosestPoint((x, y), keyList)
+                    key = keymap[y][x]
                     firstDevice[key[0]] = (int(image[y,x,2]), int(image[y,x,1]), int(image[y,x,0]))
 
             sdk.set_led_colors_buffer_by_device_index(0, firstDevice)
